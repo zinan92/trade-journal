@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trade Journal · 盘前计划 · 盘后复盘 · 日历追踪</title>
+  <link rel="stylesheet" href="/css/app.css?v=14">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>Trade Journal</span>
+    </div>
+
+    <nav class="primary-nav" aria-label="主导航">
+      <button class="nav-btn on" data-view="morning" id="navMorningBtn">
+        ☀ 盘前计划 <span id="planNavDot" class="plan-dot" title="今日盘前计划状态"></span>
+      </button>
+      <button class="nav-btn" data-view="journal">📝 盘后复盘</button>
+      <button class="nav-btn" data-view="rules">📅 日历与统计</button>
+    </nav>
+
+    <div class="cmd-wrap">
+      <div class="cmd-box">
+        <span class="cmd-prefix">/</span>
+        <input id="cmdInput" type="text" autocomplete="off" spellcheck="false"
+               placeholder="快速查图：/NVDA 15m、/SPX 4h、/GOLD 1d… (⌘K)">
+        <kbd class="cmd-kbd">⌘K</kbd>
+      </div>
+      <div id="cmdMenu" class="cmd-menu hidden"></div>
+    </div>
+
+    <div class="top-utils">
+      <button id="btnOpenCache" class="btn icon-btn" title="本地 SQLite 行情缓存与 CSV 导入">⚙ 数据</button>
+    </div>
+  </header>
+
+  <!-- 视图一（默认主页）：☀ 盘前计划（Pre-trading：2张核心市场卡 + 3步看图边写结论 + 盘前波动教练） -->
+  <main id="viewMorning" class="morning-page">
+    <div class="morning-bar">
+      <div class="mb-left">
+        <button id="morningFreshness" class="fresh-pill" title="点击立即强制刷新全盘最新行情">🕒 Last updated: 正在加载…</button>
+        <div class="mb-anchors">
+          <a href="#msec-indices">Step 1 大盘宏观</a>
+          <a href="#msec-etfs">Step 2 板块 ETF</a>
+          <a href="#msec-ai_compute">3A AI 芯片/设备</a>
+          <a href="#msec-memory_optical">3B 存储/光通信</a>
+          <a href="#msec-mega_other">3C 巨头/防御</a>
+        </div>
+      </div>
+      <div class="mb-right">
+        <div class="seg" id="morningIvSeg" title="整页同步切换 K 线周期">
+          <button class="on" data-miv="1wk">周线 1wk</button>
+          <button data-miv="4h">4 小时 4h</button>
+          <button data-miv="15m">15 分钟 15m</button>
+          <button data-miv="1d">日线 1d</button>
+        </div>
+        <button id="btnMorningEma" class="btn xs on" title="叠加 EMA 20 / 50 / 100 / 200 四条均线">
+          EMA
+          <span class="ema-legend">
+            <i style="color:#ef4444">20</i>
+            <i style="color:#d97706">50</i>
+            <i style="color:#0891b2">100</i>
+            <i style="color:#2563eb">200</i>
+          </span>
+        </button>
+        <button id="btnMorningRefresh" class="btn xs">↻ 刷新全盘</button>
+      </div>
+    </div>
+
+    <!-- 合并精简后的 2 张核心市场卡：1) 昨日35只自选股广度+1年排位  2) VIX 恐慌中枢 -->
+    <section id="thermoGrid" class="thermo-grid two-cards">
+      <div class="thermo-card">
+        <div class="tc-label">昨日自选股票池表现（加载中…）</div>
+        <div class="tc-loading">正在并发拉取 48 个标的日线计算中位数、均值与 1 年排位…</div>
+      </div>
+    </section>
+
+    <!-- Step 1 / Step 2 / Step 3A-3C 交互式 K 线网格（每步下方紧跟极简自动保存结论框） -->
+    <div id="morningSections" class="morning-sections">
+      <div class="morning-skeleton">正在拉取全盘周线 K 线数据…</div>
+    </div>
+  </main>
+
+  <!-- 视图二：📝 盘后复盘（After-trading：左日期列表 + 中居中文章纸 + 顶部当日盘前快照 + 文内小图） -->
+  <main id="viewJournal" class="journal-layout hidden">
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <button id="btnNewEntry" class="btn primary" style="width:100%;margin-bottom:8px">+ 新建复盘</button>
+        <input id="searchInput" type="text" placeholder="搜索标的 / 关键词…">
+      </div>
+      <div id="entryList" class="entry-list"></div>
+    </aside>
+
+    <section class="journal-canvas">
+      <article class="article-sheet">
+        <header class="art-head">
+          <input id="edTitle" class="art-title" type="text" placeholder="无标题复盘（口述后点 Gemini 归类自动生成标题）…">
+          <div class="art-meta">
+            <input id="edDate" type="date" class="art-meta-in">
+            <span class="art-dot">·</span>
+            <select id="edOutcome" class="art-meta-sel">
+              <option value="win">✅ 盈利</option>
+              <option value="loss">❌ 亏损</option>
+              <option value="missed">🟡 踏空 / 没做</option>
+              <option value="review">📝 复盘观察</option>
+            </select>
+            <span class="art-dot">·</span>
+            <input id="edPnl" type="text" class="art-meta-pnl" placeholder="盈亏 如 +$850">
+            <div class="art-meta-right">
+              <span id="saveState" class="save-state">已保存</span>
+              <button id="btnDelEntry" class="btn xs danger-ghost" title="删除此条复盘">删除</button>
+            </div>
+          </div>
+        </header>
+
+        <!-- 当日盘前计划快照（自动关联当前复盘日期，对照早上计划 vs 实际执行） -->
+        <div id="articlePlanCard" class="art-plan-snap hidden"></div>
+
+        <!-- 可折叠原始口述区 -->
+        <div id="rawBlock" class="art-dictation">
+          <div class="art-dict-bar">
+            <button id="btnToggleDictation" class="art-dict-toggle" type="button">
+              <span id="dictToggleIcon">▾</span>
+              <span id="dictToggleLabel">🎙 口述 / 自由输入（写完点右侧一键归类成文章）</span>
+            </button>
+            <button id="btnOrganize" class="btn xs primary">✦ Gemini 一键归类</button>
+          </div>
+          <div id="rawBodyWrap" class="art-dict-body">
+            <textarea id="edRaw" rows="5" placeholder="直接把今天收盘想复盘的一切倒进来：实际执行了什么、结果如何、做对了什么、应该买什么没买、下次学到了什么…&#10;写完点右上角「✦ Gemini 一键归类」，自动整理成下方干净的复盘文章。"></textarea>
+          </div>
+        </div>
+
+        <!-- 连续文章正文 -->
+        <div class="art-prose">
+          <section class="prose-sec" data-psec="context">
+            <div class="prose-kicker">背景与判断逻辑 <span>Context &amp; Thesis</span></div>
+            <textarea id="edContext" class="prose-in" rows="2" placeholder="宏观事件、大盘位置、核心判断逻辑…"></textarea>
+          </section>
+
+          <section class="prose-sec" data-psec="exec">
+            <div class="prose-kicker">实际执行与赔率 <span>Execution &amp; Math</span></div>
+            <textarea id="edExec" class="prose-in" rows="2" placeholder="入场时间、价格、期权行权价与赔率测算…"></textarea>
+          </section>
+
+          <section class="prose-sec tone-good" data-psec="didright">
+            <div class="prose-kicker">做对了什么 <span>What I Did Right</span></div>
+            <textarea id="edDidRight" class="prose-in" rows="2" placeholder="这笔交易或观察里哪些判断、风控或克制是做对了的…"></textarea>
+          </section>
+
+          <section class="prose-sec tone-amber" data-psec="should">
+            <div class="prose-kicker">本该做但没做 <span>I should have done, but I didn't</span></div>
+            <textarea id="edShould" class="prose-in" rows="2" placeholder="该出手没出手、或该守纪律没守住的具体动作与原因…"></textarea>
+          </section>
+
+          <section class="prose-sec tone-green" data-psec="takeaway">
+            <div class="prose-kicker-row">
+              <div class="prose-kicker">下次学到什么 <span>Next-Time Iron Rule</span></div>
+              <button id="btnPromoteRule" class="quiet-link" type="button">★ 收入纪律库</button>
+            </div>
+            <textarea id="edTakeaway" class="prose-in" rows="2" placeholder="提炼 1–2 句下次可直接照做的铁律…"></textarea>
+          </section>
+        </div>
+
+        <!-- 文末 Hashtag 标签行 -->
+        <footer class="art-tags-bar">
+          <div id="biasWrap" class="hashtag-list"></div>
+          <div class="hashtag-add-wrap">
+            <button id="btnToggleTagPicker" class="quiet-link" type="button">+ #标签</button>
+            <div id="tagPickerPop" class="tag-picker-pop hidden">
+              <div id="tagPresets" class="tag-presets"></div>
+              <div class="tag-custom-row">
+                <input id="customTagIn" type="text" placeholder="自定义标签回车添加…">
+              </div>
+            </div>
+          </div>
+        </footer>
+
+        <!-- 文内小图与截图 -->
+        <section class="art-media-strip">
+          <div class="art-media-head">
+            <span class="muted">文内附图（点击小图放大查看；支持 Cmd+V 直接粘贴截图）</span>
+            <div class="art-media-acts">
+              <div class="sym-picker-wrap">
+                <button id="btnInsertSym" class="btn xs" type="button">+ 插 K 线小图</button>
+                <div id="symPickerPop" class="tag-picker-pop sym-picker-pop hidden">
+                  <div class="tag-custom-row" style="display:flex;gap:6px">
+                    <input id="insertSymIn" type="text" placeholder="输入代码如 NVDA / MU / 黄金 回车…">
+                    <button id="btnInsertSymConfirm" class="btn xs primary" type="button">插入</button>
+                  </div>
+                  <div id="symPresets" class="tag-presets"></div>
+                </div>
+              </div>
+              <label class="btn xs" style="cursor:pointer">
+                贴图 / 上传
+                <input id="imgFileIn" type="file" accept="image/*" style="display:none">
+              </label>
+            </div>
+          </div>
+          <div id="inlineChartsGrid" class="inline-charts-grid"></div>
+          <div id="attGrid" class="inline-att-grid"></div>
+        </section>
+      </article>
+    </section>
+  </main>
+
+  <!-- 视图三：📅 日历与统计（Track Everything：每日 Package 月历 + 铁律库 & 行为统计） -->
+  <main id="viewRules" class="page-wrap hidden">
+    <!-- 上半区：每日 Package 交易日历 -->
+    <section class="cal-section">
+      <div class="cal-head">
+        <div>
+          <h2>📅 每日交易 Package 日历</h2>
+          <p class="muted">把每天的市场快照、盘前 3 步决策、盘后执行结果与学到的铁律打包存档，点任意一天即可回溯。</p>
+        </div>
+        <div class="cal-nav">
+          <button id="btnCalPrev" class="btn xs">‹ 上月</button>
+          <strong id="calMonthLabel" class="cal-month-label">2026 年 11 月</strong>
+          <button id="btnCalNext" class="btn xs">下月 ›</button>
+          <button id="btnCalToday" class="btn xs">今天</button>
+        </div>
+      </div>
+
+      <div class="cal-split">
+        <div class="cal-board">
+          <div class="cal-weekdays">
+            <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+          </div>
+          <div id="calendarGrid" class="cal-grid"></div>
+        </div>
+
+        <aside id="pkgDetail" class="pkg-detail">
+          <div class="muted" style="padding:20px 0;text-align:center">点击左侧日历中的任意一天，查看当天的完整 Package</div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- 下半区：长期纪律库与行为漏洞统计 -->
+    <div class="page-head" style="margin-top:26px;padding-top:22px;border-top:1px solid var(--line)">
+      <div>
+        <h2>🧭 纪律库 &amp; 行为统计</h2>
+        <p class="muted">持续沉淀「下次学到什么」成为刚性铁律，统计高频心魔模式。</p>
+      </div>
+      <button id="btnAiReview" class="btn primary">✦ 让 Gemini 复盘我的行为模式</button>
+    </div>
+
+    <div id="kpiRow" class="kpi-row"></div>
+    <div id="aiReviewBox" class="ai-box hidden"></div>
+
+    <div class="two-col">
+      <section class="panel">
+        <div class="panel-h">
+          <h3>刚性交易铁律</h3>
+          <span class="muted">按触发/提醒次数排序</span>
+        </div>
+        <div class="add-rule-row">
+          <input id="newRuleIn" type="text" placeholder="手写一条交易铁律回车加入…">
+          <button id="btnAddRule" class="btn primary">添加</button>
+        </div>
+        <div id="rulesList" class="rules-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-h">
+          <h3>高频心魔 / 偏差排行</h3>
+          <span class="muted">来自全部历史复盘 #标签</span>
+        </div>
+        <div id="biasChart" class="bias-chart"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- 右侧滑出抽屉：🔥 盘前波动教练（仅在 Tab 1 盘前计划中呼出） -->
+  <div id="coachBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="coachDrawer" class="coach-drawer hidden" aria-label="盘前波动教练">
+    <div class="cd-head">
+      <div>
+        <div class="cd-title-row">
+          <h3>🔥 盘前波动教练</h3>
+          <span id="coachRegimeLabel" class="radar-regime">扫描中…</span>
+        </div>
+        <div id="coachFreshness" class="cd-fresh">🕒 正在同步实时体温计…</div>
+      </div>
+      <div class="cd-head-acts">
+        <button id="btnCoachReset" class="btn xs" title="基于最新实时行情重扫并重新发起提问">↻ 重扫</button>
+        <button id="btnCoachClose" class="btn xs">✕</button>
+      </div>
+    </div>
+
+    <div id="coachSyncStrip" class="cd-sync-strip"></div>
+    <div id="coachFeed" class="coach-feed"></div>
+
+    <div class="coach-quick">
+      <button class="q-chip" data-qmsg="现在是极端大波动窗口，我有点犹豫不敢下手。结合当前体温计和我的铁律，帮我定一个下限锁死、赔率高的 Bet 方案。">🔥 推我定一个可控 Bet</button>
+      <button class="q-chip" data-qmsg="帮我评估一下：今天应该果断写 Do Nothing，还是等 15m 企稳信号再动？">🤔 Do Nothing 还是等 15m？</button>
+      <button class="q-chip" data-qmsg="如果我要趁低波动或高弹性买期权（Call/Put/Strangle），怎么锁死最大亏损？">🎯 期权锁风险方案</button>
+    </div>
+
+    <div class="coach-input-row">
+      <textarea id="coachInput" rows="2" placeholder="直接回应教练（Enter 发送，Shift+Enter 换行）…"></textarea>
+      <button id="btnCoachSend" class="btn primary">发送</button>
+    </div>
+
+    <div class="cd-foot">
+      <button id="btnCoachToPlan" class="btn xs primary">↘ 写入 Step 3 今日交易决策</button>
+      <button id="btnCoachCommit" class="btn xs">存入盘后复盘</button>
+    </div>
+  </aside>
+
+  <!-- 后台工具弹窗：⚙ 本地 SQLite 行情缓存 & CSV 导入 -->
+  <div id="cacheModal" class="zoom-modal hidden">
+    <div class="zoom-card cache-modal-card">
+      <div class="zoom-head">
+        <div class="zoom-title">
+          <strong>⚙ 本地 SQLite 行情库</strong>
+          <span id="cacheTotal" class="muted">0 组缓存</span>
+        </div>
+        <button id="btnCacheClose" class="btn xs">✕</button>
+      </div>
+      <div class="cache-modal-body">
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-h">
+              <h3>已缓存标的与周期</h3>
+              <span class="muted">~/.trade-journal/journal.db</span>
+            </div>
+            <div id="cacheTable" class="cache-table"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-h">
+              <h3>导入自定义 OHLCV CSV</h3>
+              <span class="muted">TradingView 导出格式</span>
+            </div>
+            <div class="csv-form">
+              <div class="row">
+                <input id="csvSym" type="text" placeholder="标的代码 如 SPX / ES / NQ" value="SPX">
+                <select id="csvIv">
+                  <option value="5m">5m</option>
+                  <option value="15m" selected>15m</option>
+                  <option value="1h">1h</option>
+                  <option value="4h">4h</option>
+                  <option value="1d">1d</option>
+                </select>
+              </div>
+              <textarea id="csvText" rows="8" placeholder="time,open,high,low,close,volume&#10;2026-11-20 09:30:00,7250,7265,7242,7260,12000"></textarea>
+              <button id="btnImportCsv" class="btn primary">写入本地 K 线库</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 单张小图点击放大浮层 -->
+  <div id="zoomModal" class="zoom-modal hidden">
+    <div class="zoom-card">
+      <div class="zoom-head">
+        <div class="zoom-title">
+          <strong id="zoomSym">NVDA</strong>
+          <span id="zoomName" class="muted">英伟达</span>
+          <span id="zoomPrice" class="price-tag">--</span>
+          <span id="zoomPct" class="chg-tag">--</span>
+        </div>
+        <div class="zoom-controls">
+          <div class="seg" id="zoomIvSeg">
+            <button data-ziv="1wk">周线</button>
+            <button data-ziv="4h">4h</button>
+            <button data-ziv="15m">15m</button>
+            <button data-ziv="1d">日线</button>
+          </div>
+          <span class="ema-legend-bar" title="均线图例">
+            <span style="color:#ef4444">● 20</span>
+            <span style="color:#d97706">● 50</span>
+            <span style="color:#0891b2">● 100</span>
+            <span style="color:#2563eb">● 200</span>
+          </span>
+          <button id="btnZoomReset" class="btn xs" title="重置横纵轴缩放">重置 ↺</button>
+          <button id="btnZoomToJournal" class="btn xs primary">✎ 插入当前复盘</button>
+          <button id="btnZoomClose" class="btn xs">✕</button>
+        </div>
+      </div>
+      <div class="zoom-pin-bar" id="zoomPinBar">
+        <span class="muted">点击 K 线打点记入当前复盘：</span>
+        <div class="pin-seg">
+          <button class="pin-btn buy" data-kind="buy">🟢 买入</button>
+          <button class="pin-btn sell" data-kind="sell">🔴 卖出</button>
+          <button class="pin-btn missed on" data-kind="missed">🟡 Should have</button>
+          <button class="pin-btn mistake" data-kind="mistake">🟣 破纪律</button>
+        </div>
+        <span id="zoomMarkerCount" class="muted"></span>
+      </div>
+      <div class="zoom-body">
+        <div id="zoomChartEl" class="zoom-chart-el"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="lightbox" class="lightbox hidden">
+    <img id="lightboxImg" alt="chart preview">
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/vendor/lightweight-charts.standalone.production.js"></script>
+  <script src="/js/app.js?v=14"></script>
+</body>
+</html>
