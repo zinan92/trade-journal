@@ -292,6 +292,169 @@ def test_concurrent_sqlite_writes_are_thread_safe(tmp_path: Path, monkeypatch) -
     assert all(r == 20 if idx % 2 == 0 else r >= 3 for idx, r in enumerate(results))
 
 
+def test_ai_generation_config_and_thought_filtering() -> None:
+    from trade_journal import ai
+
+    # Gemini 3+ / 4 uses thinkingLevel (never thinkingBudget)
+    fast_38 = ai.build_generation_config("gemini-3.8-flash", tier="fast", response_mime_type="application/json")
+    assert fast_38 == {
+        "responseMimeType": "application/json",
+        "thinkingConfig": {"thinkingLevel": "LOW"},
+    }
+
+    pro_4 = ai.build_generation_config("gemini-4-neon", tier="pro", pro_thinking="high")
+    assert pro_4 == {"thinkingConfig": {"thinkingLevel": "HIGH"}}
+
+    pro_4_xhigh = ai.build_generation_config("gemini-4-carbon", tier="pro", pro_thinking="xhigh")
+    assert pro_4_xhigh == {"thinkingConfig": {"thinkingLevel": "XHIGH"}}
+
+    # Legacy Gemini 2.5 uses thinkingBudget (0 for fast, dynamic/budget for pro)
+    fast_25 = ai.build_generation_config("gemini-2.5-flash", tier="fast", response_mime_type="application/json")
+    assert fast_25 == {
+        "responseMimeType": "application/json",
+        "thinkingConfig": {"thinkingBudget": 0},
+    }
+    pro_25_dyn = ai.build_generation_config("gemini-2.5-pro", tier="pro", pro_thinking="high")
+    assert pro_25_dyn == {"thinkingConfig": {"thinkingBudget": -1}}
+    pro_25_num = ai.build_generation_config("gemini-2.5-pro", tier="pro", pro_thinking="8192")
+    assert pro_25_num == {"thinkingConfig": {"thinkingBudget": 8192}}
+
+    # Thought parts must be filtered out so chain-of-thought never leaks into output
+    payload = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {"thought": True, "text": "内部推理草稿不应输出"},
+                        {"text": '{"title": "精准复盘"}'},
+                    ]
+                }
+            }
+        ]
+    }
+    assert ai.extract_text(payload) == '{"title": "精准复盘"}'
+
+
+def test_ai_tiered_model_routing_across_three_endpoints(tmp_path: Path, monkeypatch) -> None:
+    from trade_journal import ai, db
+
+    monkeypatch.setenv("TRADE_JOURNAL_DATA", str(tmp_path / "tj_ai"))
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key-123")
+    monkeypatch.setenv("GEMINI_FAST_MODEL", "models/gemini-3.8-flash")
+    monkeypatch.setenv("GEMINI_PRO_MODEL", "gemini-4-neon")
+    monkeypatch.setenv("GEMINI_PRO_THINKING", "high")
+
+    db_file = tmp_path / "tj_ai" / "journal.db"
+    conn = db.connect(db_file)
+    db.init_db(conn)
+    # 写入少量本地 K 线缓存避免 coach_reply 触发网络请求
+    bars = [
+        {"time": 1760000000 + d * 86400, "open": 100.0, "high": 102.0, "low": 99.0, "close": 101.0, "volume": 1000}
+        for d in range(10)
+    ]
+    market.save_candles(conn, "NVDA", "1d", bars)
+    market.save_candles(conn, "VIX", "1d", bars)
+
+    captured_calls: list[dict] = []
+
+    class _FakeResp:
+        def __init__(self, payload: dict) -> None:
+            self.status_code = 200
+            self.text = ""
+            self._payload = payload
+
+        def json(self) -> dict:
+            return self._payload
+
+    def fake_post(url: str, *, params=None, headers=None, json=None, timeout=None):
+        captured_calls.append({"url": url, "json": json, "timeout": timeout})
+        if "gemini-3.8-flash" in url:
+            body_text = (
+                '{"title": "NVDA 突破踏空复盘", "outcome": "missed", "primary_symbol": "NVDA", '
+                '"symbols": ["NVDA"], "bias_tags": ["踏空犹豫"], "context_note": "放量突破", '
+                '"execution_note": "没上车", "did_right_note": "没乱追", '
+                '"should_have_note": "0.5R 试仓 Call", "takeaway_note": "锁死最大亏损直接上车", "needs_chart": "single"}'
+            )
+        else:
+            body_text = "1. 核心漏洞：高赔率窗口不敢下注。\n2. 拍板 3 问：① NVDA ② 3DTE Call ③ 最大亏 $500。"
+        return _FakeResp(
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"thought": True, "text": "内部思考过程"},
+                                {"text": body_text},
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(ai.httpx, "post", fake_post)
+    monkeypatch.setattr(
+        app_mod.morning,
+        "build_morning_summary",
+        lambda conn, force=False, allow_network=True: {
+            "regime": "extreme",
+            "regimeLabel": "极端大波动",
+            "freshness": {"label": "本地缓存"},
+            "vix": {"price": 28.5, "percentile60d": 92.0, "percentile1y": 88.0, "dayPct": 12.0, "weekPct": 25.0, "squeezeRatio": 1.4, "stateLabel": "恐慌放大"},
+            "thermometer": {"totalCount": 1, "latestDate": "2026-11-27", "medianPct": -4.2, "meanPct": -4.2, "upCount": 0, "downCount": 1, "rarityHeadline": "1年罕见", "groupStats": []},
+            "plan": {"step1_note": "大盘承压", "step2_note": "SMH 弱", "step3_note": "等止跌"},
+        },
+    )
+
+    client = TestClient(app_mod.create_app(db_file))
+
+    # 0. Bootstrap exposes active fast/pro models
+    boot = client.get("/api/bootstrap")
+    assert boot.status_code == 200
+    assert boot.json()["aiModels"] == {
+        "fast": "gemini-3.8-flash",
+        "pro": "gemini-4-neon",
+        "proThinking": "high",
+    }
+
+    # 1. Organize uses FAST model + low thinking + JSON mime type
+    ce = client.post("/api/entries", json={"symbol": "NVDA", "raw_note": "今天 NVDA 放量突破没敢买 Call"})
+    eid = ce.json()["entry"]["id"]
+    org = client.post(f"/api/entries/{eid}/organize", json={})
+    assert org.status_code == 200
+    assert org.json()["model"] == "gemini-3.8-flash"
+    assert org.json()["entry"]["title"] == "NVDA 突破踏空复盘"
+    assert "gemini-3.8-flash:generateContent" in captured_calls[0]["url"]
+    assert captured_calls[0]["json"]["generationConfig"] == {
+        "responseMimeType": "application/json",
+        "thinkingConfig": {"thinkingLevel": "LOW"},
+    }
+    assert captured_calls[0]["timeout"] == ai.FAST_TIMEOUT_SEC
+
+    # 2. Volatility Coach uses PRO model + HIGH thinking + longer timeout
+    coach = client.post("/api/coach/reply", json={"message": "VIX 飙到 28 了，我在犹豫要不要抄底 NVDA"})
+    assert coach.status_code == 200
+    assert coach.json()["model"] == "gemini-4-neon"
+    assert "内部思考过程" not in coach.json()["reply"]
+    assert "gemini-4-neon:generateContent" in captured_calls[1]["url"]
+    assert captured_calls[1]["json"]["generationConfig"] == {
+        "thinkingConfig": {"thinkingLevel": "HIGH"},
+    }
+    assert captured_calls[1]["timeout"] == ai.PRO_TIMEOUT_SEC
+
+    # 3. Behavior Mode Review uses PRO model + HIGH thinking + longer timeout
+    rev = client.post("/api/ai/review", json={"focus": "踏空问题"})
+    assert rev.status_code == 200
+    assert rev.json()["model"] == "gemini-4-neon"
+    assert "内部思考过程" not in rev.json()["reply"]
+    assert "gemini-4-neon:generateContent" in captured_calls[2]["url"]
+    assert captured_calls[2]["json"]["generationConfig"] == {
+        "thinkingConfig": {"thinkingLevel": "HIGH"},
+    }
+    assert captured_calls[2]["timeout"] == ai.PRO_TIMEOUT_SEC
+
+
+
 
 
 

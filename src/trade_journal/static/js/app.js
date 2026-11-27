@@ -69,6 +69,7 @@
     bannerDismissed: false,
     todayPlan: null,
     planStreak: { streak: 0, totalSigned: 0, totalReviewed: 0 },
+    aiModels: { fast: 'gemini-3.8-flash', pro: 'gemini-4-neon', proThinking: 'high' },
     morningInterval: '1wk',
     morningEma: true,
     morningSummary: null,
@@ -233,7 +234,7 @@
       S.symbol = res.entry.symbol;
       renderEntryList();
       renderEditor({ autoCollapseRaw: true });
-      toast('Gemini 已归类整理成文章 ✓');
+      toast(`Gemini (${res.model || S.aiModels.fast}) 已归类整理成文章 ✓`);
     } catch (e) {
       toast(`整理失败：${e.message}`);
     } finally {
@@ -800,7 +801,7 @@
     if (!text) return;
     inp.value = '';
     S.coachMessages.push({ role: 'user', content: text });
-    S.coachMessages.push({ role: 'agent', content: '正在结合当前实时体温计和你的交易铁律思考方案…' });
+    S.coachMessages.push({ role: 'agent', content: `正在用 ${S.aiModels.pro}（深度思考）结合当前实时体温计与你的交易铁律推演方案…` });
     renderCoachDrawer();
     const btn = $('btnCoachSend');
     btn.disabled = true;
@@ -1798,10 +1799,10 @@
     $('btnAiReview').addEventListener('click', async () => {
       const box = $('aiReviewBox');
       box.classList.remove('hidden');
-      box.textContent = '正在用 Gemini 分析你近期的交易复盘与 Should have done 模式…';
+      box.textContent = `正在用 ${S.aiModels.pro}（深度思考）审计你近期的交易复盘与 Should have done 模式…`;
       try {
         const res = await api('POST', '/api/ai/review', {});
-        box.textContent = res.reply;
+        box.textContent = res.model ? `${res.reply}\n\n— 模型：${res.model}` : res.reply;
       } catch (e) {
         box.textContent = `分析失败：${e.message}`;
       }
@@ -1977,6 +1978,7 @@
     S.stats = b.stats || {};
     S.todayPlan = b.todayPlan || null;
     S.planStreak = b.planStreak || { streak: 0, totalSigned: 0, totalReviewed: 0 };
+    if (b.aiModels) S.aiModels = { ...S.aiModels, ...b.aiModels };
     syncPlanNavDot();
 
     if (!S.entries.length) {

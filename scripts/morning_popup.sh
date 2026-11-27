@@ -7,9 +7,12 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$HOME/.trade-journal/logs"
 mkdir -p "$LOG_DIR"
 
-# 读取用户 ~/.zshrc 中的 GOOGLE_API_KEY（若尚未在环境里）
-if [[ -z "${GOOGLE_API_KEY:-}" && -f "$HOME/.zshrc" ]]; then
-  eval "$(grep -E '^[[:space:]]*export[[:space:]]+(GOOGLE_API_KEY|GEMINI_API_KEY)=' "$HOME/.zshrc" 2>/dev/null || true)"
+# 读取用户 ~/.zshrc 中的 Gemini 相关配置（若尚未在环境里）
+if [[ -f "$HOME/.zshrc" ]]; then
+  if [[ -z "${GOOGLE_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" ]]; then
+    eval "$(grep -E '^[[:space:]]*export[[:space:]]+(GOOGLE_API_KEY|GEMINI_API_KEY)=' "$HOME/.zshrc" 2>/dev/null || true)"
+  fi
+  eval "$(grep -E '^[[:space:]]*export[[:space:]]+(GEMINI_FAST_MODEL|GEMINI_PRO_MODEL|GEMINI_PRO_THINKING)=' "$HOME/.zshrc" 2>/dev/null || true)"
 fi
 
 PYTHON_BIN="/usr/local/bin/python3"

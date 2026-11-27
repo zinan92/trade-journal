@@ -3,20 +3,18 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, market, morning, radar
+from . import ai, db, market, morning, radar
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -174,7 +172,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             "stats": _build_stats(conn),
             "todayPlan": db.plan_to_dict(plan_row, today),
             "planStreak": db.daily_plan_streak(conn),
-            "hasGeminiKey": bool(os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")),
+            "hasGeminiKey": bool(ai.get_api_key()),
+            "aiModels": ai.get_model_config(),
         }
 
     @app.get("/api/candles")
@@ -315,9 +314,6 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         raw_text = (req.raw_note if (req and req.raw_note is not None) else row["raw_note"]) or ""
         if not raw_text.strip():
             raise HTTPException(400, "请先在口述/自由记录框里写下或粘贴你的复盘内容")
-        key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
-        if not key:
-            raise HTTPException(400, "未检测到 GOOGLE_API_KEY 或 GEMINI_API_KEY 环境变量")
 
         prompt = (
             "你是一位顶级美股与加密货币交易复盘助理。交易员刚刚口述了一段原始交易复盘（可能含中英混说、ASR 同音错别字如“靠”=Call、“迈贝尔”=Marvell、“拉姆研究”=Lam Research）。\n"
@@ -338,25 +334,9 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             f"交易员原始口述：\n{raw_text}"
         )
         try:
-            resp = httpx.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-                params={"key": key},
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "responseMimeType": "application/json",
-                        "thinkingConfig": {"thinkingBudget": 0},
-                    },
-                },
-                timeout=60.0,
-            )
-        except httpx.HTTPError as exc:
-            raise HTTPException(502, f"连接 Gemini API 超时或网络异常：{exc}") from exc
-        if resp.status_code >= 400:
-            raise HTTPException(502, f"Gemini API 返回 {resp.status_code}：{resp.text[:200]}")
-        parts = (((resp.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-        txt = "".join(str(p.get("text") or "") for p in parts).strip()
+            txt, used_model = ai.generate_content(prompt, tier="fast", response_mime_type="application/json")
+        except ai.GeminiError as exc:
+            raise HTTPException(exc.status_code, str(exc)) from exc
 
         m = re.search(r"```(?:json)?\s*([\s\S]*?)```", txt)
         cand = m.group(1).strip() if m else txt
@@ -419,6 +399,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             "needsChart": needs_chart,
             "snapshot": snapshot,
             "stats": _build_stats(conn),
+            "model": used_model,
         }
 
     @app.delete("/api/entries/{entry_id}")
@@ -550,8 +531,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     @app.post("/api/ai/review")
     def ai_review(req: AIReviewReq | None = None) -> dict[str, Any]:
-        key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
-        if not key:
+        if not ai.get_api_key():
             raise HTTPException(400, "未检测到 GOOGLE_API_KEY 或 GEMINI_API_KEY 环境变量")
         rows = conn.execute("SELECT * FROM entries ORDER BY trade_date DESC, id DESC LIMIT 20").fetchall()
         if not rows:
@@ -578,23 +558,12 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             "3. **一句客观复盘点评**（不鸡汤、只讲概率与执行）"
         )
         try:
-            resp = httpx.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-                params={"key": key},
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"thinkingConfig": {"thinkingBudget": 0}},
-                },
-                timeout=60.0,
-            )
-        except httpx.HTTPError as exc:
-            raise HTTPException(502, f"连接 Gemini API 超时或网络异常：{exc}") from exc
-        if resp.status_code >= 400:
-            raise HTTPException(502, f"Gemini API 返回 {resp.status_code}：{resp.text[:180]}")
-        parts = (((resp.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-        text = "".join(str(p.get("text") or "") for p in parts).strip()
-        return {"ok": True, "reply": text, "model": "gemini-2.5-flash"}
+            text, used_model = ai.generate_content(prompt, tier="pro")
+        except ai.GeminiError as exc:
+            raise HTTPException(exc.status_code, str(exc)) from exc
+        if not text:
+            raise HTTPException(502, "行为模式复盘返回为空")
+        return {"ok": True, "reply": text, "model": used_model}
 
     # ---------- Proactive Volatility Radar & Bet-Push Coach ----------
     def _coach_messages(day: str) -> list[dict[str, Any]]:
@@ -659,8 +628,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         user_msg = (req.message or "").strip()
         if not user_msg:
             raise HTTPException(400, "请输入你的回复")
-        key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
-        if not key:
+        if not ai.get_api_key():
             raise HTTPException(400, "未检测到 GOOGLE_API_KEY 或 GEMINI_API_KEY 环境变量")
 
         day = db.today_str()
@@ -735,22 +703,9 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             "请以【教练】身份直接回复交易员最后一条消息（简洁有力，分点清晰，300字以内，不要套话）："
         )
         try:
-            resp = httpx.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-                params={"key": key},
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"thinkingConfig": {"thinkingBudget": 0}},
-                },
-                timeout=60.0,
-            )
-        except httpx.HTTPError as exc:
-            raise HTTPException(502, f"连接 Gemini API 超时或网络异常：{exc}") from exc
-        if resp.status_code >= 400:
-            raise HTTPException(502, f"Gemini API 返回 {resp.status_code}：{resp.text[:180]}")
-        parts = (((resp.json().get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-        reply_text = "".join(str(p.get("text") or "") for p in parts).strip()
+            reply_text, used_model = ai.generate_content(prompt, tier="pro")
+        except ai.GeminiError as exc:
+            raise HTTPException(exc.status_code, str(exc)) from exc
         if not reply_text:
             raise HTTPException(502, "波动教练返回为空")
 
@@ -762,6 +717,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         return {
             "ok": True,
             "reply": reply_text,
+            "model": used_model,
             "summary": summary,
             "regime": summary["regime"],
             "regimeLabel": summary["regimeLabel"],

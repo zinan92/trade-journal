@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![SQLite WAL](https://img.shields.io/badge/SQLite-Local%20WAL-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
 [![Lightweight Charts](https://img.shields.io/badge/TradingView-Lightweight%20Charts-131722?style=flat-square)](https://tradingview.github.io/lightweight-charts/)
-[![Gemini 2.5 Flash](https://img.shields.io/badge/Gemini-Optional%20AI-4285F4?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/)
+[![Gemini Optional AI](https://img.shields.io/badge/Gemini-Fast%20%2B%20Pro%20AI-4285F4?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
 
 **面向美股与跨资产交易员的本地日终闭环工作台——盘前 3 步 4-EMA 扫图定调，盘后文章式复盘，按日打包归档到日历。**
@@ -27,7 +27,7 @@
 - **in**: 48 个跨资产标的（美股指数 / 商品 / 加密 / 核心 ETF / 35 只自选股）行情、盘前 3 步文字定调、盘后口述复盘与粘贴截图、或 TradingView OHLCV CSV
 - **out**: `1wk / 4h / 15m / 1d` 四均线（`EMA 20 / 50 / 100 / 200`）交互 K 线墙、自动挂载当日市场快照的文章式复盘、K 线 4 类打点、按日归档的 Package 日历与可统计纪律库
 - **fail**: 上游行情限流或断网时自动回退本地 SQLite 历史缓存并标明时效；未配置 `GOOGLE_API_KEY` 时 100% 保留图表、计划、复盘与日历功能，仅停用 AI 归类与波动教练；无记录日期展示可一键补写的空状态
-- **Adapters**: Yahoo Finance（日/周线 + `includePrePost` 盘前盘后分钟线 + CME 23 小时指数期货 `ES=F / NQ=F / YM=F`）、TradingView OHLCV CSV、Google Gemini 2.5 Flash（可选）
+- **Adapters**: Yahoo Finance（日/周线 + `includePrePost` 盘前盘后分钟线 + CME 23 小时指数期货 `ES=F / NQ=F / YM=F`）、TradingView OHLCV CSV、Google Gemini 快慢双模型（默认 `gemini-3.8-flash` 口述归类 + `gemini-4-neon` 深度推理教练/审计，可选）
 
 ---
 
@@ -139,10 +139,10 @@ Trade Journal 把交易员每天最核心的动作收拢到一个本地单页工
 │                    └─────────────────────────────────┘        │        │
 └─────────────────────────────────┬─────────────────────────────┼────────┘
                                   │                             │
-                  ┌───────────────▼──────────────┐   ┌──────────▼────────┐
-                  │ Yahoo Finance / TV CSV Input │   │ Gemini 2.5 Flash  │
-                  │   (行情拉取 · 失败读本地缓存)  │   │ (可选 · 仅点击触发) │
-                  └──────────────────────────────┘   └───────────────────┘
+                  ┌───────────────▼──────────────┐   ┌──────────▼────────────┐
+                  │ Yahoo Finance / TV CSV Input │   │ Gemini Fast + Pro AI  │
+                  │   (行情拉取 · 失败读本地缓存)  │   │ (可选 · 按场景分层路由) │
+                  └──────────────────────────────┘   └───────────────────────┘
 ```
 
 ---
@@ -162,12 +162,19 @@ PYTHONPATH=src python3 -m trade_journal.server serve --port 8796
 
 启动后在浏览器打开 `http://127.0.0.1:8796` 即可使用全部图表、盘前计划、盘后复盘、日历与 CSV 导入功能。
 
-### 2. 可选：启用 Gemini AI 能力
+### 2. 可选：启用 Gemini AI 能力（快慢双模型分层）
 
-若需要「盘后口述一键归类」、「盘前波动教练对话」与「行为模式复盘」，在环境变量中提供 Gemini Key（兼容 `GOOGLE_API_KEY` 或 `GEMINI_API_KEY`，示例见 [`.env.example`](.env.example)）：
+若需要「盘后口述一键归类」、「盘前波动教练对话」与「行为模式复盘」，在环境变量中提供 Gemini Key（兼容 `GOOGLE_API_KEY` 或 `GEMINI_API_KEY`，示例见 [`.env.example`](.env.example)）。系统默认按任务难度分层路由：
+
+- **快速层（`GEMINI_FAST_MODEL`，默认 `gemini-3.8-flash`）**：用于「盘后 Gemini 一键归类」，低延迟、严格输出 JSON。
+- **深度推理层（`GEMINI_PRO_MODEL`，默认 `gemini-4-neon`，默认开启 `thinkingLevel=high`）**：用于「盘前波动教练」与「行为模式审计」，做赔率风控推演与跨多篇复盘的深度洞察。
 
 ```bash
 export GOOGLE_API_KEY="your-gemini-api-key"
+# 可选：自定义分层模型（例如使用免费层 Key 时可将 Pro 也设为 gemini-3.8-flash）
+# export GEMINI_FAST_MODEL="gemini-3.8-flash"
+# export GEMINI_PRO_MODEL="gemini-4-neon"
+# export GEMINI_PRO_THINKING="high"
 PYTHONPATH=src python3 -m trade_journal.server serve --port 8796
 ```
 
@@ -232,7 +239,7 @@ python3 scripts/capture_screenshots.py
 
 - **后端**：Python 3.11+ · FastAPI · Uvicorn · `httpx` · SQLite3（WAL 模式）
 - **前端**：原生 ES Module + HTML/CSS（零构建步骤、即改即刷新）· TradingView `lightweight-charts`
-- **AI（可选）**：Google Gemini API（`gemini-2.5-flash`）
+- **AI（可选）**：Google Gemini API（快慢分层：默认 `gemini-3.8-flash` + `gemini-4-neon` 深度思考，支持环境变量覆盖）
 - **测试与截图验证**：`pytest` · Playwright
 
 ---
@@ -250,6 +257,7 @@ trade-journal/
 │   ├── capture_screenshots.py      # 隔离演示库 Playwright 自动截图脚本
 │   └── morning_popup.sh            # macOS 每日盘前自动启动与打开脚本
 ├── src/trade_journal/
+│   ├── ai.py                       # Gemini 快慢双模型路由与跨代 thinkingConfig 适配
 │   ├── app.py                      # FastAPI 路由、复盘/日历/教练与 Gemini 接口
 │   ├── db.py                       # ThreadSafe SQLite WAL 数据层与表结构迁移
 │   ├── market.py                   # Yahoo Finance 抓取、Pre/Post 聚合、Bar 去重与 CSV 导入
@@ -269,6 +277,9 @@ trade-journal/
 | :--- | :--- | :---: | :--- |
 | `TRADE_JOURNAL_DATA` | `~/.trade-journal` | 否 | 本地 SQLite 数据库 (`journal.db`) 与复盘截图 (`media/`) 存储目录 |
 | `GOOGLE_API_KEY` | 无 | 否 | Gemini API Key（也兼容 `GEMINI_API_KEY`），仅用于 AI 口述归类、行为复盘与盘前波动教练 |
+| `GEMINI_FAST_MODEL` | `gemini-3.8-flash` | 否 | 盘后「口述一键归类」使用的快速模型 |
+| `GEMINI_PRO_MODEL` | `gemini-4-neon` | 否 | 盘前「波动教练」与日历页「行为模式复盘」使用的强推理模型（免费层可设为 `gemini-3.8-flash`） |
+| `GEMINI_PRO_THINKING` | `high` | 否 | 强推理模型的思考深度（Gemini 3+/4 支持 `low / medium / high / xhigh`；Gemini 2.5 支持整数 budget 或 `-1`） |
 
 > **零 API Key 基线**：不配置任何环境变量即可 100% 正常使用盘前 48 标的 4-EMA 扫图、3 步计划、盘后文章复盘、K 线打点、截图粘贴、每日 Package 日历、纪律库统计与 CSV 导入。
 
@@ -293,6 +304,9 @@ default_base_url: "http://127.0.0.1:8796"
 auth_required: false
 optional_env:
   - GOOGLE_API_KEY
+  - GEMINI_FAST_MODEL
+  - GEMINI_PRO_MODEL
+  - GEMINI_PRO_THINKING
   - TRADE_JOURNAL_DATA
 inputs:
   market_summary: "GET /api/morning/summary?force=false"
@@ -346,7 +360,7 @@ with httpx.Client(base_url=BASE, timeout=15.0) as client:
 PYTHONPATH=src python3 -m pytest -v
 ```
 
-测试预期全部通过（`7 passed`）。
+测试预期全部通过（`9 passed`）。
 
 ---
 
