@@ -480,16 +480,15 @@ def test_ai_provider_auto_resolution_and_agy_cli_headless(monkeypatch) -> None:
     monkeypatch.setattr(ai.subprocess, "run", fake_run)
     text_fast, m_fast = ai.generate_content("整理口述", tier="fast")
     assert text_fast == "推演完成：锁死 0.5R 上限。"
-    assert m_fast == "agy:low"
-    assert "--effort" in seen_cmds[0] and seen_cmds[0][seen_cmds[0].index("--effort") + 1] == "low"
+    assert m_fast == f"agy:{ai.DEFAULT_AGY_FAST_MODEL}"
+    assert "--model" in seen_cmds[0] and seen_cmds[0][seen_cmds[0].index("--model") + 1] == ai.DEFAULT_AGY_FAST_MODEL
     assert "--disable-slash-commands" in seen_cmds[0]
 
-    monkeypatch.setenv("AGY_PRO_MODEL", "gemini-4-neon")
+    monkeypatch.setenv("AGY_PRO_MODEL", "gemini-4-carbon-high")
     text_pro, m_pro = ai.generate_content("深度复盘", tier="pro")
     assert text_pro == "推演完成：锁死 0.5R 上限。"
-    assert m_pro == "gemini-4-neon"
-    assert "--effort" in seen_cmds[1] and seen_cmds[1][seen_cmds[1].index("--effort") + 1] == "high"
-    assert "--model" in seen_cmds[1] and seen_cmds[1][seen_cmds[1].index("--model") + 1] == "gemini-4-neon"
+    assert m_pro == "agy:gemini-4-carbon-high"
+    assert "--model" in seen_cmds[1] and seen_cmds[1][seen_cmds[1].index("--model") + 1] == "gemini-4-carbon-high"
 
 
 def test_ai_gemini_cli_headless_and_error_hint(monkeypatch) -> None:

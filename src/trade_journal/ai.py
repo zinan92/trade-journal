@@ -21,6 +21,10 @@ DEFAULT_FAST_MODEL = "gemini-3.8-flash"
 DEFAULT_PRO_MODEL = "gemini-4-neon"
 DEFAULT_PRO_THINKING = "high"
 
+# Antigravity CLI (`agy`) 默认分层模型（对应 `agy models` 列表，免 API Key）
+DEFAULT_AGY_FAST_MODEL = "gemini-3.8-flash-low"
+DEFAULT_AGY_PRO_MODEL = "gemini-4-neon-high"
+
 # Gemini CLI 默认分层模型（对应 gemini --list-models 列表）
 DEFAULT_GEMINI_CLI_FAST_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_CLI_PRO_MODEL = "gemini-2.5-pro"
@@ -158,7 +162,7 @@ def is_configured() -> bool:
 def get_fast_model(provider: str | None = None) -> str:
     prov = provider or resolve_provider()
     if prov == "agy":
-        return _clean_model_name(os.environ.get("AGY_FAST_MODEL", ""), "agy (effort=low)")
+        return _clean_model_name(os.environ.get("AGY_FAST_MODEL", ""), DEFAULT_AGY_FAST_MODEL)
     if prov == "gemini-cli":
         raw = os.environ.get("GEMINI_CLI_FAST_MODEL") or os.environ.get("GEMINI_FAST_MODEL") or ""
         return _clean_model_name(raw, DEFAULT_GEMINI_CLI_FAST_MODEL)
@@ -168,7 +172,7 @@ def get_fast_model(provider: str | None = None) -> str:
 def get_pro_model(provider: str | None = None) -> str:
     prov = provider or resolve_provider()
     if prov == "agy":
-        return _clean_model_name(os.environ.get("AGY_PRO_MODEL", ""), f"agy (effort={get_pro_thinking()})")
+        return _clean_model_name(os.environ.get("AGY_PRO_MODEL", ""), DEFAULT_AGY_PRO_MODEL)
     if prov == "gemini-cli":
         raw = os.environ.get("GEMINI_CLI_PRO_MODEL") or os.environ.get("GEMINI_PRO_MODEL") or ""
         return _clean_model_name(raw, DEFAULT_GEMINI_CLI_PRO_MODEL)
@@ -343,26 +347,22 @@ def _generate_via_agy_cli(
     if not agy_bin:
         raise GeminiError(400, "未检测到 Antigravity CLI (`agy`)，请先安装并登录 `agy`，或配置 GOOGLE_API_KEY")
 
-    explicit_model = (
-        os.environ.get("AGY_FAST_MODEL", "").strip()
-        if tier == "fast"
-        else os.environ.get("AGY_PRO_MODEL", "").strip()
-    )
+    model = get_fast_model("agy") if tier == "fast" else get_pro_model("agy")
     effort = "low" if tier == "fast" else _AGY_EFFORT_MAP.get(get_pro_thinking(), "high")
-    model_label = explicit_model or f"agy:{effort}"
+    model_label = f"agy:{model}"
 
     cmd = [
         agy_bin,
         "-p",
         prompt,
+        "--model",
+        model,
         "--output-format",
         "json",
         "--disable-slash-commands",
-        "--effort",
-        effort,
     ]
-    if explicit_model:
-        cmd.extend(["--model", explicit_model])
+    if not re.search(r"-(?:low|medium|high|xhigh|max)$", model.lower()):
+        cmd.extend(["--effort", effort])
 
     try:
         proc = subprocess.run(
