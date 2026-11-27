@@ -51,10 +51,12 @@
       </div>
       <div class="mb-right">
         <div class="seg" id="morningIvSeg" title="整页同步切换 K 线周期">
-          <button data-miv="1wk">周线 1wk</button>
-          <button class="on" data-miv="4h">4 小时 4h</button>
-          <button data-miv="15m">15 分钟 15m</button>
-          <button data-miv="1d">日线 1d</button>
+          <button data-miv="1wk">1W</button>
+          <button data-miv="1d">1D</button>
+          <button class="on" data-miv="4h">4H</button>
+          <button data-miv="30m">30M</button>
+          <button data-miv="15m">15M</button>
+          <button data-miv="5m">5M</button>
         </div>
         <button id="btnMorningEma" class="btn xs on" title="叠加 EMA 20 / 50 / 100 / 200 四条均线">
           EMA
@@ -375,10 +377,12 @@
         </div>
         <div class="zoom-controls">
           <div class="seg" id="zoomIvSeg">
-            <button data-ziv="1wk">周线</button>
-            <button data-ziv="4h">4h</button>
-            <button data-ziv="15m">15m</button>
-            <button data-ziv="1d">日线</button>
+            <button data-ziv="1wk">1W</button>
+            <button data-ziv="1d">1D</button>
+            <button data-ziv="4h">4H</button>
+            <button data-ziv="30m">30M</button>
+            <button data-ziv="15m">15M</button>
+            <button data-ziv="5m">5M</button>
           </div>
           <span class="ema-legend-bar" title="均线图例">
             <span style="color:#ef4444">● 20</span>
@@ -414,6 +418,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/vendor/lightweight-charts.standalone.production.js"></script>
-  <script src="/js/app.js?v=16"></script>
+  <script src="/js/app.js?v=17"></script>
 </body>
 </html>

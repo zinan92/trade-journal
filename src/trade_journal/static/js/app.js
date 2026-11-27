@@ -1105,7 +1105,7 @@
     el.dataset.mounted = '1';
     const bars = card.candles || [];
     if (!bars.length) return;
-    const isIntraday = interval === '15m' || interval === '4h';
+    const isIntraday = ['5m', '15m', '30m', '1h', '4h'].includes(interval);
     const c = LightweightCharts.createChart(el, {
       width: el.clientWidth || 295,
       height: el.clientHeight || 195,
@@ -1413,7 +1413,7 @@
       $('zoomPct').textContent = `${sign}${data.changePct}%`;
       $('zoomPct').className = `chg-tag ${data.changePct >= 0 ? 'sc-up' : 'sc-dn'}`;
 
-      const isIntraday = interval === '15m' || interval === '4h' || interval === '5m' || interval === '1h';
+      const isIntraday = ['5m', '15m', '30m', '1h', '4h'].includes(interval);
       zoomChart = LightweightCharts.createChart(el, {
         width: el.clientWidth || 880,
         height: 460,
