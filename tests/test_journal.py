@@ -535,6 +535,68 @@ def test_ai_gemini_cli_headless_and_error_hint(monkeypatch) -> None:
         assert "Antigravity CLI" in str(exc)
 
 
+def test_market_catalyst_calendar_and_big_move_outlook(tmp_path: Path, monkeypatch) -> None:
+    from trade_journal import db, events
+
+    monkeypatch.setenv("TRADE_JOURNAL_DATA", str(tmp_path / "tj_ev"))
+    db_file = tmp_path / "tj_ev" / "journal.db"
+    conn = db.connect(db_file)
+    db.init_db(conn)
+
+    # 1. 验证黑五半天盘 + 高 VIX 组合输出高概率大波动预警与未来重磅催化（FOMC / AVGO / MU / NVDA）
+    outlook = events.build_catalyst_outlook(
+        conn,
+        today_str="2026-11-27",
+        vix={"price": 26.8, "percentile60d": 93.3, "percentile1y": 95.6, "squeezeRatio": 1.56, "state": "expansion"},
+        thermometer={"totalCount": 34, "medianPct": -1.01, "severity": "normal", "extremeDaysInYear": 74, "tradingDaysInYear": 252},
+    )
+    assert outlook["session"]["kind"] == "half_day"
+    assert "黑五" in outlook["session"]["label"]
+    assert outlook["bigMove"]["level"] == "extreme"
+    assert outlook["bigMove"]["score"] >= 70
+    up_titles = [e["title"] for e in outlook["upcomingEvents"]]
+    assert any("FOMC" in t for t in up_titles)
+    assert any("NVDA" in t for t in up_titles)
+    assert any("MU" in t for t in up_titles)
+
+    # 2. 验证 /api/events CRUD 与 /api/calendar 月历事件合并（含自动计算的四巫日）
+    client = TestClient(app_mod.create_app(db_file))
+    cal_dec = client.get("/api/calendar?month=2026-12")
+    assert cal_dec.status_code == 200
+    days_dec = cal_dec.json()["days"]
+    assert "2026-12-09" in days_dec
+    dec9_titles = [e["title"] for e in days_dec["2026-12-09"]["events"]]
+    assert any("FOMC" in t for t in dec9_titles) and any("AVGO" in t for t in dec9_titles)
+    assert "2026-12-18" in days_dec
+    assert any("四巫日" in e["title"] for e in days_dec["2026-12-18"]["events"])
+
+    # 添加与删除自定义催化事件
+    created = client.post(
+        "/api/events",
+        json={
+            "event_date": "2026-12-03",
+            "title": "关税听证会窗口",
+            "category": "custom",
+            "impact": "high",
+            "symbol": "SMH",
+            "time_label": "盘中",
+            "note": "关注半导体供应链表态",
+        },
+    )
+    assert created.status_code == 200
+    ev_id = created.json()["event"]["db_id"]
+
+    pkg = client.get("/api/packages/2026-12-03")
+    assert pkg.status_code == 200
+    assert any(e["title"] == "关税听证会窗口" for e in pkg.json()["events"])
+
+    deleted = client.delete(f"/api/events/{ev_id}")
+    assert deleted.status_code == 200
+    pkg2 = client.get("/api/packages/2026-12-03")
+    assert all(e["title"] != "关税听证会窗口" for e in pkg2.json()["events"])
+
+
+
 
 
 

@@ -1015,7 +1015,69 @@
     $('thermoGrid').querySelectorAll('[data-zsym]').forEach((el) => {
       el.addEventListener('click', () => openZoomModal(el.dataset.zsym, S.morningInterval));
     });
+    renderCatalystRadar();
     syncCoachBadgeAndFreshness();
+  }
+
+  function renderCatalystRadar() {
+    const box = $('catalystRadar');
+    if (!box) return;
+    const cat = S.morningSummary?.catalysts;
+    if (!cat) {
+      box.classList.add('hidden');
+      return;
+    }
+    const bm = cat.bigMove || {};
+    const sess = cat.session || {};
+    const todayEvs = cat.todayEvents || [];
+    const upcoming = cat.upcomingEvents || [];
+    const timeline = [...todayEvs, ...upcoming].slice(0, 8);
+
+    const reasonsHtml = (bm.reasons || []).map((r) => `<li>${esc(r)}</li>`).join('');
+    const timelineHtml = timeline.length ? timeline.map((ev) => {
+      const clickable = ev.symbol ? `data-zsym="${esc(ev.symbol)}" style="cursor:pointer"` : '';
+      const isToday = ev.daysAway === 0;
+      const dateShort = (ev.event_date || '').slice(5);
+      return `
+        <div class="cr-ev-chip cat-${esc(ev.category)} ${ev.impact === 'high' ? 'high' : ''} ${isToday ? 'is-today' : ''}" ${clickable} title="${esc(ev.note || ev.title)}">
+          <div class="cr-ev-top">
+            <span class="cr-ev-when">${esc(ev.countdown || dateShort)}</span>
+            <span class="cr-ev-date">${esc(dateShort)}</span>
+          </div>
+          <div class="cr-ev-title">${esc(ev.icon || '📌')} ${esc(ev.title)}</div>
+          <div class="cr-ev-meta">${esc(ev.time_label || ev.categoryLabel || '')}${ev.symbol ? ` · ${esc(ev.symbol)}` : ''}</div>
+        </div>
+      `;
+    }).join('') : `<div class="muted" style="font-size:12.5px">未来 30 天暂无高影响催化事件</div>`;
+
+    box.className = `catalyst-radar level-${esc(bm.level || 'low')}`;
+    box.innerHTML = `
+      <div class="cr-head">
+        <div class="cr-head-left">
+          <span class="cr-badge level-${esc(bm.level || 'low')}">${esc(bm.badge || '🟢 常规波动日')}</span>
+          <span class="cr-score" title="综合 VIX 分位、自选股广度极端度、假日半天盘与当日/临近催化计算">大波动指数 <strong>${bm.score ?? '--'}</strong>/100</span>
+          <span class="cr-session kind-${esc(sess.kind || 'regular')}">${esc(sess.label || '')}</span>
+        </div>
+        <div class="cr-head-acts">
+          <button id="btnCrOpenCal" class="btn xs" type="button">📅 完整事件日历 / 添加提醒 ›</button>
+        </div>
+      </div>
+      <div class="cr-headline">${esc(bm.headline || '')}</div>
+      ${reasonsHtml ? `<ul class="cr-reasons">${reasonsHtml}</ul>` : ''}
+      <div class="cr-strip-label">
+        <span>📌 今日 &amp; 近期重点关注（FOMC · 非农/CPI · 核心财报 · 假日/四巫日）</span>
+        <span class="muted">点击带标的卡片可直接看 K 线</span>
+      </div>
+      <div class="cr-timeline">${timelineHtml}</div>
+    `;
+
+    $('btnCrOpenCal')?.addEventListener('click', () => {
+      S.selectedCalDate = S.today;
+      switchView('rules');
+    });
+    box.querySelectorAll('[data-zsym]').forEach((el) => {
+      el.addEventListener('click', () => openZoomModal(el.dataset.zsym, S.morningInterval));
+    });
   }
 
   function zoomChartRange(c, factor) {
@@ -1514,13 +1576,20 @@
       const mktTxt = ms.medianPct !== undefined
         ? `${Number(ms.medianPct) >= 0 ? '+' : ''}${Number(ms.medianPct).toFixed(1)}%${ms.vixPrice ? ` · V${Math.round(ms.vixPrice)}` : ''}`
         : (pkg?.pnl || '');
+      const evs = pkg?.events || [];
+      const evHtml = evs.slice(0, 2).map((ev) => {
+        const shortT = ev.title.replace(/（.*?）/g, '').slice(0, 14);
+        return `<div class="cc-ev-pill cat-${esc(ev.category)}" title="${esc(ev.title)}${ev.note ? ' — ' + ev.note : ''}">${esc(ev.icon || '📌')} ${esc(shortT)}</div>`;
+      }).join('') + (evs.length > 2 ? `<div class="cc-ev-more">+${evs.length - 2} 项</div>` : '');
       const snippet = pkg?.titlePreview || pkg?.decisionPreview || '';
+      const hasHighEv = pkg?.highImpactEvent;
       cells.push(`
-        <div class="cal-cell ${isToday ? 'today' : ''} ${isSel ? 'selected' : ''} ${pkg ? 'has-pkg' : ''}" data-cdate="${dstr}">
+        <div class="cal-cell ${isToday ? 'today' : ''} ${isSel ? 'selected' : ''} ${pkg?.hasPlan || pkg?.hasReview ? 'has-pkg' : ''} ${hasHighEv ? 'has-catalyst' : ''}" data-cdate="${dstr}">
           <div class="cc-top">
             <span class="cc-day">${day}</span>
             <span class="cc-dots">${dots.join('')}</span>
           </div>
+          ${evHtml ? `<div class="cc-evs">${evHtml}</div>` : ''}
           ${mktTxt ? `<div class="cc-mkt">${esc(mktTxt)}</div>` : ''}
           ${snippet ? `<div class="cc-snippet">${esc(snippet)}</div>` : ''}
         </div>
@@ -1542,12 +1611,28 @@
     const pkg = S.calDays?.[dstr];
     const plan = pkg?.plan;
     const entries = pkg?.entries || [];
+    const evs = pkg?.events || [];
     const ms = pkg?.marketSnapshot || {};
 
     const mktChips = [];
     if (ms.vixPrice !== undefined) mktChips.push(`VIX ${ms.vixPrice}`);
     if (ms.medianPct !== undefined) mktChips.push(`35只中位数 ${Number(ms.medianPct) >= 0 ? '+' : ''}${Number(ms.medianPct).toFixed(2)}%`);
     if (ms.extremeDaysInYear && ms.tradingDaysInYear) mktChips.push(`1年排位 ${ms.extremeDaysInYear}/${ms.tradingDaysInYear}天`);
+
+    const eventsHtml = evs.length ? evs.map((ev) => `
+      <div class="pkg-event-card cat-${esc(ev.category)}">
+        <div class="pkg-ev-top">
+          <strong>${esc(ev.icon || '📌')} ${esc(ev.title)}</strong>
+          <div class="pkg-ev-acts">
+            ${ev.impact === 'high' ? '<span class="ev-imp high">高波动</span>' : (ev.impact === 'medium' ? '<span class="ev-imp med">中影响</span>' : '')}
+            ${ev.symbol ? `<button class="btn xs" data-ev-sym="${esc(ev.symbol)}" type="button">${esc(ev.symbol)} 图 ›</button>` : ''}
+            ${ev.editable && ev.db_id ? `<button class="btn xs danger-ghost" data-del-ev="${ev.db_id}" type="button">删</button>` : ''}
+          </div>
+        </div>
+        ${ev.time_label ? `<div class="pkg-ev-time">🕒 ${esc(ev.time_label)} · ${esc(ev.categoryLabel || '')}</div>` : ''}
+        ${ev.note ? `<div class="pkg-ev-note">${esc(ev.note)}</div>` : ''}
+      </div>
+    `).join('') : `<div class="pkg-box muted">当日暂无预设关键事件，可点击下方添加自定义提醒。</div>`;
 
     const planRows = [];
     if (plan?.step1_note) planRows.push(`<div><b>Step 1 大盘：</b>${esc(plan.step1_note)}</div>`);
@@ -1575,6 +1660,36 @@
         <h3>${esc(dstr)}</h3>
         <button class="btn xs primary" id="btnPkgWriteReview">${entries.length ? '编辑当日复盘 ›' : '+ 补写当日复盘'}</button>
       </div>
+      <div class="pkg-sec">
+        <div class="pkg-sec-row">
+          <div class="pkg-sec-label">📌 关键市场事件 &amp; 波动催化</div>
+          <button class="quiet-link" id="btnToggleAddEv" type="button">+ 添加提醒事件</button>
+        </div>
+        ${eventsHtml}
+        <form id="addEvForm" class="pkg-add-ev hidden">
+          <input id="evTitleIn" type="text" placeholder="事件名称，如：NVDA GTC 主题演讲 / 关税截止日" required>
+          <div class="pkg-add-ev-row">
+            <select id="evCatIn">
+              <option value="earnings">📊 核心财报</option>
+              <option value="fomc">🏦 美联储 FOMC</option>
+              <option value="macro">📈 宏观数据</option>
+              <option value="holiday">🗓 假日 / 半天盘</option>
+              <option value="custom" selected>📌 自定义提醒</option>
+            </select>
+            <select id="evImpIn">
+              <option value="high" selected>高波动</option>
+              <option value="medium">中影响</option>
+              <option value="low">常规提示</option>
+            </select>
+            <input id="evSymIn" type="text" placeholder="关联标的 如 NVDA" style="max-width:110px">
+          </div>
+          <div class="pkg-add-ev-row">
+            <input id="evTimeIn" type="text" placeholder="时间如 盘后 AMC / 08:30 ET">
+            <button class="btn xs primary" type="submit">保存事件</button>
+          </div>
+          <input id="evNoteIn" type="text" placeholder="备注：为什么重要 / 需要盯什么（可选）">
+        </form>
+      </div>
       ${mktChips.length ? `
         <div class="pkg-sec">
           <div class="pkg-sec-label">当日市场快照</div>
@@ -1592,6 +1707,56 @@
     `;
 
     $('btnPkgWriteReview')?.addEventListener('click', () => openOrCreateEntryForDate(dstr));
+    $('btnToggleAddEv')?.addEventListener('click', () => {
+      const f = $('addEvForm');
+      if (f) {
+        f.classList.toggle('hidden');
+        if (!f.classList.contains('hidden')) $('evTitleIn')?.focus();
+      }
+    });
+    $('addEvForm')?.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const title = ($('evTitleIn')?.value || '').trim();
+      if (!title) return;
+      try {
+        await api('POST', '/api/events', {
+          event_date: dstr,
+          title,
+          category: $('evCatIn')?.value || 'custom',
+          impact: $('evImpIn')?.value || 'high',
+          symbol: ($('evSymIn')?.value || '').trim(),
+          time_label: ($('evTimeIn')?.value || '').trim(),
+          note: ($('evNoteIn')?.value || '').trim(),
+        });
+        toast('已添加到事件日历 ✓');
+        await loadCalendarMonth(S.calMonth);
+        if (S.morningSummary) {
+          const evRes = await api('GET', '/api/events');
+          S.morningSummary.catalysts = {
+            ...S.morningSummary.catalysts,
+            todayEvents: evRes.todayEvents,
+            upcomingEvents: evRes.upcomingEvents,
+          };
+          renderCatalystRadar();
+        }
+      } catch (e) {
+        toast(`添加失败：${e.message}`);
+      }
+    });
+    box.querySelectorAll('[data-del-ev]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          await api('DELETE', `/api/events/${btn.dataset.delEv}`);
+          toast('已删除自定义事件');
+          await loadCalendarMonth(S.calMonth);
+        } catch (e) {
+          toast(`删除失败：${e.message}`);
+        }
+      });
+    });
+    box.querySelectorAll('[data-ev-sym]').forEach((btn) => {
+      btn.addEventListener('click', () => openZoomModal(btn.dataset.evSym, S.morningInterval || '1d'));
+    });
     box.querySelectorAll('[data-open-eid]').forEach((btn) => {
       btn.addEventListener('click', () => {
         S.activeEntryId = Number(btn.dataset.openEid);

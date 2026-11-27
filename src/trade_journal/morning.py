@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from statistics import median
 from typing import Any
 
-from . import db, market
+from . import db, events, market
 
 MORNING_SECTIONS: list[dict[str, Any]] = [
     {
@@ -416,6 +416,13 @@ def build_morning_summary(
         "label": f"Last updated: {last_updated_at.replace('T', ' ')[:19]} · 美股日线截至 {latest_eq_date}",
     }
 
+    catalyst_outlook = events.build_catalyst_outlook(
+        conn,
+        today_str=today,
+        vix=vix,
+        thermometer=thermometer,
+    )
+
     return {
         "scannedAt": scanned_at,
         "lastUpdatedAt": last_updated_at,
@@ -425,6 +432,7 @@ def build_morning_summary(
         "freshness": freshness,
         "vix": vix,
         "thermometer": thermometer,
+        "catalysts": catalyst_outlook,
         "quickStrip": quick_strip,
         "sections": MORNING_SECTIONS,
         "plan": plan,
@@ -450,10 +458,27 @@ def build_coach_opening(summary: dict[str, Any]) -> str:
         else ""
     )
     stamp = f"🕒 时效：{fresh}\n\n"
+    cat = summary.get("catalysts") or {}
+    bm = cat.get("bigMove") or {}
+    sess = cat.get("session") or {}
+    today_evs = cat.get("todayEvents") or []
+    upcoming_evs = (cat.get("upcomingEvents") or [])[:4]
+    ev_lines: list[str] = []
+    if sess.get("kind") in ("half_day", "closed", "weekend"):
+        ev_lines.append(f"• 今日交易时段：**{sess.get('label')}**")
+    for ev in today_evs:
+        if ev.get("category") != "holiday":
+            ev_lines.append(f"• 今日催化：**{ev['title']}**（{ev.get('time_label') or '全天'}）")
+    if upcoming_evs:
+        ev_lines.append(
+            "• 近期关注：" + " · ".join(f"{e['countdown']} {e['title']}" for e in upcoming_evs[:3])
+        )
+    cat_block = (f"📅 **今日波动雷达（{bm.get('badge', '')}）**\n" + "\n".join(ev_lines) + "\n\n") if ev_lines else ""
 
     if regime == "extreme":
         return (
             stamp
+            + cat_block
             + f"🔥 **极端波动警报（与左侧体温计实时同步）**\n{vix_txt}；{med_txt}。\n\n"
             + "这是过去一年里最罕见的高弹性窗口，花 2 分钟拍板：\n"
             + "1. 这波剧烈波动背后真正发生了什么？是恐慌错杀超跌，还是结构性破位？\n"
@@ -462,6 +487,7 @@ def build_coach_opening(summary: dict[str, Any]) -> str:
     if regime == "squeeze":
         return (
             stamp
+            + cat_block
             + f"🧊 **波动率极致收窄警报（变盘前兆）**\n{vix_txt}；{med_txt}。\n\n"
             + "现在隐含波动率处于冰点，**买期权正是最便宜的甜点区**。先回答两句：\n"
             + "1. 未来 1–2 周你盯到什么催化（CPI / 议息 / 财报 / 关键均线三角末端）？\n"
@@ -470,11 +496,13 @@ def build_coach_opening(summary: dict[str, Any]) -> str:
     if regime == "elevated":
         return (
             stamp
+            + cat_block
             + f"⚡ **显著波动提示**\n{vix_txt}；{med_txt}。\n\n"
             + "盘面已经脱离常规区，切 4h / 15m 看一眼你最关心的标的——今天是 **重点盯盘等 15m 信号**，还是继续 **Do Nothing**？"
         )
     return (
         stamp
+        + cat_block
         + f"🟢 **当前为常规波动日**\n{vix_txt}；{med_txt}。\n\n"
         + "市场既没到极端恐慌，也没收窄到冰点。如果今天没看到清晰催化，**直接签字「Do Nothing」留足子弹**就是满分操作。"
     )

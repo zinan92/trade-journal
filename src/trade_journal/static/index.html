@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Trade Journal · 盘前计划 · 盘后复盘 · 日历追踪</title>
-  <link rel="stylesheet" href="/css/app.css?v=14">
+  <link rel="stylesheet" href="/css/app.css?v=15">
 </head>
 <body>
   <header class="topbar">
@@ -76,6 +76,9 @@
         <div class="tc-loading">正在并发拉取 48 个标的日线计算中位数、均值与 1 年排位…</div>
       </div>
     </section>
+
+    <!-- 今日大波动预警 & 关键市场事件雷达（黑五/假日、FOMC、CPI/非农、NVDA/AVGO/MU/MRVL 财报倒计时） -->
+    <section id="catalystRadar" class="catalyst-radar hidden"></section>
 
     <!-- Step 1 / Step 2 / Step 3A-3C 交互式 K 线网格（每步下方紧跟极简自动保存结论框） -->
     <div id="morningSections" class="morning-sections">
@@ -211,8 +214,8 @@
     <section class="cal-section">
       <div class="cal-head">
         <div>
-          <h2>📅 每日交易 Package 日历</h2>
-          <p class="muted">把每天的市场快照、盘前 3 步决策、盘后执行结果与学到的铁律打包存档，点任意一天即可回溯。</p>
+          <h2>📅 每日交易 Package &amp; 关键事件日历</h2>
+          <p class="muted">同屏对照美联储 FOMC、非农/CPI、核心公司财报、美股假日/半天盘与每日盘前盘后复盘；点击任意日期查看详情或添加自定义提醒。</p>
         </div>
         <div class="cal-nav">
           <button id="btnCalPrev" class="btn xs">‹ 上月</button>
@@ -220,6 +223,14 @@
           <button id="btnCalNext" class="btn xs">下月 ›</button>
           <button id="btnCalToday" class="btn xs">今天</button>
         </div>
+      </div>
+      <div class="cal-legend">
+        <span><i class="cc-ev-dot fomc"></i> 美联储 FOMC</span>
+        <span><i class="cc-ev-dot earnings"></i> 核心财报</span>
+        <span><i class="cc-ev-dot macro"></i> CPI / 非农</span>
+        <span><i class="cc-ev-dot holiday"></i> 假日 / 半天盘</span>
+        <span><i class="cc-ev-dot opex"></i> 四巫日</span>
+        <span><i class="cc-ev-dot custom"></i> 自定义事件</span>
       </div>
 
       <div class="cal-split">
@@ -403,6 +414,6 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="/vendor/lightweight-charts.standalone.production.js"></script>
-  <script src="/js/app.js?v=14"></script>
+  <script src="/js/app.js?v=15"></script>
 </body>
 </html>

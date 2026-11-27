@@ -231,7 +231,8 @@ python3 scripts/capture_screenshots.py
 | `POST` | `/api/entries/{entry_id}/organize` | 调用 Gemini 将原始口述拆解到五个复盘段落（可选） |
 | `POST / PATCH / DELETE` | `/api/entries/{entry_id}/markers` | 新增、修改或删除某条复盘关联的 K 线打点 |
 | `POST` | `/api/entries/{entry_id}/attachments` | 上传剪贴板粘贴的本地复盘截图 |
-| `GET` | `/api/calendar?month=YYYY-MM` | 按月返回每日 Package 摘要（市场快照 + 计划/复盘标记） |
+| `GET / POST / DELETE` | `/api/events` · `/api/events/{id}` | 查询关键市场事件与今日大波动预警（FOMC / 非农 CPI / 核心财报 / 假日半天盘 / 四巫日），或增删自定义提醒 |
+| `GET` | `/api/calendar?month=YYYY-MM` | 按月返回每日 Package 摘要（市场快照 + 计划/复盘标记 + 关键事件日历） |
 | `GET` | `/api/packages/{plan_date}` | 获取指定日期的完整 Daily Package（市场快照 + 盘前 3 步 + 盘后复盘） |
 | `GET / POST` | `/api/coach/state` · `/api/coach/reply` · `/api/coach/commit` | 盘前波动教练状态、对话与一键写入 Step 3 决策（可选） |
 | `GET` | `/api/candles?symbol=NVDA&interval=1d` | 拉取单标的多周期 K 线（优先命中本地 SQLite 缓存） |
@@ -265,6 +266,7 @@ trade-journal/
 │   ├── ai.py                       # Gemini 快慢双模型路由与跨代 thinkingConfig 适配
 │   ├── app.py                      # FastAPI 路由、复盘/日历/教练与 Gemini 接口
 │   ├── db.py                       # ThreadSafe SQLite WAL 数据层与表结构迁移
+│   ├── events.py                   # 关键市场事件日历（FOMC / CPI / 财报 / 假日 / 四巫日）与今日大波动预警引擎
 │   ├── market.py                   # Yahoo Finance 抓取、Pre/Post 聚合、Bar 去重与 CSV 导入
 │   ├── morning.py                  # 48 标的观察池、35 股体温计与 1 年罕见度排位计算
 │   ├── radar.py                    # VIX 恐慌中枢与极端波动评级
@@ -366,7 +368,7 @@ with httpx.Client(base_url=BASE, timeout=15.0) as client:
 PYTHONPATH=src python3 -m pytest -v
 ```
 
-测试预期全部通过（`11 passed`）。
+测试预期全部通过（`12 passed`）。
 
 ---
 

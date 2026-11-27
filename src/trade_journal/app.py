@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, db, market, morning, radar
+from . import ai, db, events, market, morning, radar
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -121,6 +121,16 @@ class CsvImportReq(BaseModel):
 
 class AIReviewReq(BaseModel):
     focus: str = ""
+
+
+class MarketEventCreateReq(BaseModel):
+    event_date: str
+    title: str
+    category: str = "custom"  # holiday | fomc | macro | earnings | opex | custom
+    impact: str = "high"  # high | medium | low
+    time_label: str = ""
+    symbol: str = ""
+    note: str = ""
 
 
 def _build_stats(conn) -> dict[str, Any]:
@@ -690,6 +700,22 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             f"Step 3 决策：{plan.get('step3_note') or plan.get('plan_note')}" if (plan.get("step3_note") or plan.get("plan_note")) else "",
         ]
         plan_block = "\n".join(x for x in plan_parts if x) or "交易员今天尚未写下盘前计划"
+
+        cat = summary.get("catalysts") or {}
+        sess = cat.get("session") or {}
+        bm = cat.get("bigMove") or {}
+        today_evs = cat.get("todayEvents") or []
+        up_evs = (cat.get("upcomingEvents") or [])[:6]
+        cat_lines = [
+            f"今日交易时段：{sess.get('label', '常规美股交易日')}",
+            f"今日大波动评估：{bm.get('badge', '')}（评分 {bm.get('score', 0)}/100）— {bm.get('headline', '')}",
+        ]
+        if today_evs:
+            cat_lines.append("今日事件：" + "；".join(f"{e['title']}({e['time_label'] or '全天'}: {e['note']})" for e in today_evs))
+        if up_evs:
+            cat_lines.append("近期催化：" + "；".join(f"[{e['event_date']} {e['countdown']}] {e['title']}({e['impact']})" for e in up_evs))
+        catalyst_block = "\n".join(cat_lines)
+
         chat_lines = "\n".join(f"{'【教练】' if m['role'] == 'agent' else '【交易员】'}：{m['content']}" for m in history)
 
         prompt = (
@@ -697,6 +723,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             "核心风格：直接、锐利、不说脏话、中英自然混说、站在顶级期权/宏观交易员视角，绝不说“投资有风险请谨慎”之类的废话。\n\n"
             f"### 统一市场体温计（状态：{summary['regimeLabel']}）\n{thermo_block}\n\n"
             f"### VIX 波动率中枢\n{vix_block}\n\n"
+            f"### 今日交易安排与关键催化日历\n{catalyst_block}\n\n"
             f"### 交易员今日计划\n{plan_block}\n\n"
             f"### 交易员自己写下的交易铁律\n{rules_block}\n\n"
             f"### 交易员近期最痛的 Should Have Done 教训\n{regret_block}\n\n"
@@ -920,16 +947,72 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             "stats": _build_stats(conn) if created_entry else None,
         }
 
+    # ---------- Market Catalysts & Events Calendar ----------
+    @app.get("/api/events")
+    def api_list_events(month: str = "", days: int = 95) -> dict[str, Any]:
+        """查询关键市场事件（按月 YYYY-MM 或从今日起未来 N 天），并附带今日大波动预警概览。"""
+        m = month.strip()
+        if re.fullmatch(r"\d{4}-\d{2}", m):
+            by_day = events.events_by_month(conn, m)
+            flat = [ev for d in sorted(by_day.keys()) for ev in by_day[d]]
+            return {"ok": True, "month": m, "events": flat, "byDate": by_day}
+        outlook = events.build_catalyst_outlook(conn, horizon_days=max(7, min(365, int(days))))
+        return {"ok": True, **outlook}
+
+    @app.post("/api/events")
+    def api_create_event(req: MarketEventCreateReq) -> dict[str, Any]:
+        ev_date = req.event_date.strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", ev_date):
+            raise HTTPException(400, "事件日期格式需为 YYYY-MM-DD")
+        title = req.title.strip()
+        if not title:
+            raise HTTPException(400, "事件标题不能为空")
+        cat = req.category if req.category in events.VALID_CATEGORIES else "custom"
+        impact = req.impact if req.impact in events.VALID_IMPACTS else "high"
+        sym = market.normalize_symbol(req.symbol)[0] if req.symbol.strip() else ""
+        cur = conn.execute(
+            """
+            INSERT INTO market_events(event_date, category, title, impact, time_label, symbol, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (ev_date, cat, title[:80], impact, req.time_label.strip()[:40], sym, req.note.strip()[:400], db.now_iso()),
+        )
+        conn.commit()
+        r = conn.execute("SELECT * FROM market_events WHERE id=?", (cur.lastrowid,)).fetchone()
+        ev_obj = events._decorate_event(
+            {
+                "id": f"custom:{r['id']}",
+                "db_id": r["id"],
+                "event_date": r["event_date"],
+                "category": r["category"],
+                "title": r["title"],
+                "impact": r["impact"],
+                "time_label": r["time_label"],
+                "symbol": r["symbol"],
+                "note": r["note"],
+                "source": "custom",
+                "editable": True,
+            }
+        )
+        return {"ok": True, "event": ev_obj}
+
+    @app.delete("/api/events/{event_id}")
+    def api_delete_event(event_id: int) -> dict[str, Any]:
+        conn.execute("DELETE FROM market_events WHERE id=?", (event_id,))
+        conn.commit()
+        return {"ok": True}
+
     # ---------- Daily Package Calendar (Track Everything) ----------
     @app.get("/api/calendar")
     def api_calendar(month: str = "") -> dict[str, Any]:
-        """按月返回每天打包好的 Daily Package（盘前计划 + 市场快照 + 盘后复盘）。"""
+        """按月返回每天打包好的 Daily Package（盘前计划 + 市场快照 + 盘后复盘 + 关键事件日历）。"""
         m = month.strip()
         if not re.fullmatch(r"\d{4}-\d{2}", m):
             m = db.today_str()[:7]
         like = f"{m}-%"
         plan_rows = conn.execute("SELECT * FROM daily_plans WHERE plan_date LIKE ? ORDER BY plan_date ASC", (like,)).fetchall()
         entry_rows = conn.execute("SELECT * FROM entries WHERE trade_date LIKE ? ORDER BY trade_date ASC, id DESC", (like,)).fetchall()
+        month_events = events.events_by_month(conn, m)
 
         days: dict[str, dict[str, Any]] = {}
         for pr in plan_rows:
@@ -939,6 +1022,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "date": dstr,
                 "plan": pd,
                 "entries": [],
+                "events": [],
             }
         for er in entry_rows:
             ed = db.entry_to_dict(conn, er)
@@ -948,14 +1032,25 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                     "date": dstr,
                     "plan": db.plan_to_dict(None, dstr),
                     "entries": [],
+                    "events": [],
                 }
             days[dstr]["entries"].append(ed)
+        for dstr, ev_list in month_events.items():
+            if dstr not in days:
+                days[dstr] = {
+                    "date": dstr,
+                    "plan": db.plan_to_dict(None, dstr),
+                    "entries": [],
+                    "events": [],
+                }
+            days[dstr]["events"] = ev_list
 
         # 为每一天汇总简明 Package 元信息（用于日历格子渲染）
         out_days: dict[str, dict[str, Any]] = {}
         for dstr, pkg in days.items():
             p = pkg["plan"]
             ents = pkg["entries"]
+            evs = pkg.get("events") or []
             outcomes = [e["outcome"] for e in ents]
             primary_outcome = (
                 "win" if "win" in outcomes else
@@ -973,6 +1068,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "date": dstr,
                 "hasPlan": bool(p.get("has_plan")),
                 "hasReview": bool(ents),
+                "hasEvents": bool(evs),
+                "highImpactEvent": any(ev.get("impact") == "high" for ev in evs),
                 "entryCount": len(ents),
                 "primaryOutcome": primary_outcome,
                 "pnl": next((e["pnl"] for e in ents if e.get("pnl")), ""),
@@ -982,6 +1079,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "marketSnapshot": p.get("market_snapshot") or {},
                 "plan": p,
                 "entries": ents,
+                "events": evs,
             }
 
         return {
@@ -993,15 +1091,17 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     @app.get("/api/packages/{plan_date}")
     def api_daily_package(plan_date: str) -> dict[str, Any]:
-        """获取某一天的完整 Daily Package（盘前计划 + 当日所有复盘文章）。"""
+        """获取某一天的完整 Daily Package（盘前计划 + 当日所有复盘文章 + 当日关键事件）。"""
         d = plan_date.strip()
         pr = conn.execute("SELECT * FROM daily_plans WHERE plan_date=?", (d,)).fetchone()
         erows = conn.execute("SELECT * FROM entries WHERE trade_date=? ORDER BY id DESC", (d,)).fetchall()
+        day_events = events.list_events(conn, start_date=d, end_date=d) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) else []
         return {
             "ok": True,
             "date": d,
             "plan": db.plan_to_dict(pr, d),
             "entries": [db.entry_to_dict(conn, r) for r in erows],
+            "events": day_events,
         }
 
     if STATIC_DIR.is_dir():

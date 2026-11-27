@@ -206,6 +206,18 @@ def init_db(conn: sqlite3.Connection) -> None:
             reviewed_at          TEXT NOT NULL DEFAULT '',
             updated_at           TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS market_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_date  TEXT NOT NULL,
+            category    TEXT NOT NULL DEFAULT 'custom',
+            title       TEXT NOT NULL,
+            impact      TEXT NOT NULL DEFAULT 'high',
+            time_label  TEXT NOT NULL DEFAULT '',
+            symbol      TEXT NOT NULL DEFAULT '',
+            note        TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL
+        );
         """
     )
     # 兼容老库无损迁移新增列
