@@ -162,19 +162,24 @@ PYTHONPATH=src python3 -m trade_journal.server serve --port 8796
 
 启动后在浏览器打开 `http://127.0.0.1:8796` 即可使用全部图表、盘前计划、盘后复盘、日历与 CSV 导入功能。
 
-### 2. 可选：启用 Gemini AI 能力（快慢双模型分层）
+### 2. 可选：启用 Gemini AI 能力（支持 API Key 或本地 CLI 免 Key，快慢双模型分层）
 
-若需要「盘后口述一键归类」、「盘前波动教练对话」与「行为模式复盘」，在环境变量中提供 Gemini Key（兼容 `GOOGLE_API_KEY` 或 `GEMINI_API_KEY`，示例见 [`.env.example`](.env.example)）。系统默认按任务难度分层路由：
+若需要「盘后口述一键归类」、「盘前波动教练对话」与「行为模式复盘」，支持三种后端（通过 `GEMINI_PROVIDER=auto|api|agy|gemini-cli` 控制，默认 `auto` 自动检测）：
+
+1. **Gemini API Key（直连 HTTP，延迟最低）**：设置 `GOOGLE_API_KEY` 或 `GEMINI_API_KEY`（示例见 [`.env.example`](.env.example)）。
+2. **Antigravity CLI（`agy`，个人账号免 API Key）**：安装并登录 `agy` 后，无需配置 Key 即可直接通过无头模式调用（Fast 用 `--effort low`，Pro 用 `--effort high`）。
+3. **Gemini CLI（`gemini`，需企业/GCP 授权或 Key）**：自动以 `--skip-trust -o json` 无头调用。
+
+系统默认按任务难度分层路由：
 
 - **快速层（`GEMINI_FAST_MODEL`，默认 `gemini-3.8-flash`）**：用于「盘后 Gemini 一键归类」，低延迟、严格输出 JSON。
 - **深度推理层（`GEMINI_PRO_MODEL`，默认 `gemini-4-neon`，默认开启 `thinkingLevel=high`）**：用于「盘前波动教练」与「行为模式审计」，做赔率风控推演与跨多篇复盘的深度洞察。
 
 ```bash
+# 方式 A：使用 Gemini API Key
 export GOOGLE_API_KEY="your-gemini-api-key"
-# 可选：自定义分层模型（例如使用免费层 Key 时可将 Pro 也设为 gemini-3.8-flash）
-# export GEMINI_FAST_MODEL="gemini-3.8-flash"
-# export GEMINI_PRO_MODEL="gemini-4-neon"
-# export GEMINI_PRO_THINKING="high"
+# 方式 B：免 Key 使用已登录的 Antigravity CLI (`agy`)
+# export GEMINI_PROVIDER="agy"
 PYTHONPATH=src python3 -m trade_journal.server serve --port 8796
 ```
 
@@ -276,10 +281,11 @@ trade-journal/
 | 环境变量 | 默认值 | 是否必需 | 说明 |
 | :--- | :--- | :---: | :--- |
 | `TRADE_JOURNAL_DATA` | `~/.trade-journal` | 否 | 本地 SQLite 数据库 (`journal.db`) 与复盘截图 (`media/`) 存储目录 |
-| `GOOGLE_API_KEY` | 无 | 否 | Gemini API Key（也兼容 `GEMINI_API_KEY`），仅用于 AI 口述归类、行为复盘与盘前波动教练 |
+| `GEMINI_PROVIDER` | `auto` | 否 | AI 后端选择：`auto`（依次尝试 API Key → `agy` CLI → `gemini` CLI）、`api`、`agy`、`gemini-cli` |
+| `GOOGLE_API_KEY` | 无 | 否 | Gemini API Key（也兼容 `GEMINI_API_KEY`），使用 `agy` CLI 时可留空 |
 | `GEMINI_FAST_MODEL` | `gemini-3.8-flash` | 否 | 盘后「口述一键归类」使用的快速模型 |
 | `GEMINI_PRO_MODEL` | `gemini-4-neon` | 否 | 盘前「波动教练」与日历页「行为模式复盘」使用的强推理模型（免费层可设为 `gemini-3.8-flash`） |
-| `GEMINI_PRO_THINKING` | `high` | 否 | 强推理模型的思考深度（Gemini 3+/4 支持 `low / medium / high / xhigh`；Gemini 2.5 支持整数 budget 或 `-1`） |
+| `GEMINI_PRO_THINKING` | `high` | 否 | 强推理模型的思考深度（Gemini 3+/4 支持 `low / medium / high / xhigh`；`agy` 自动映射为 `--effort`；Gemini 2.5 支持整数 budget 或 `-1`） |
 
 > **零 API Key 基线**：不配置任何环境变量即可 100% 正常使用盘前 48 标的 4-EMA 扫图、3 步计划、盘后文章复盘、K 线打点、截图粘贴、每日 Package 日历、纪律库统计与 CSV 导入。
 
@@ -360,7 +366,7 @@ with httpx.Client(base_url=BASE, timeout=15.0) as client:
 PYTHONPATH=src python3 -m pytest -v
 ```
 
-测试预期全部通过（`9 passed`）。
+测试预期全部通过（`11 passed`）。
 
 ---
 

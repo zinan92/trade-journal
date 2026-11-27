@@ -172,7 +172,11 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             "stats": _build_stats(conn),
             "todayPlan": db.plan_to_dict(plan_row, today),
             "planStreak": db.daily_plan_streak(conn),
+            "hasAi": ai.is_configured(),
             "hasGeminiKey": bool(ai.get_api_key()),
+            "hasAgyCli": bool(ai.find_agy_bin()),
+            "hasGeminiCli": bool(ai.find_gemini_cli_bin()),
+            "aiProvider": ai.resolve_provider(),
             "aiModels": ai.get_model_config(),
         }
 
@@ -531,8 +535,11 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     @app.post("/api/ai/review")
     def ai_review(req: AIReviewReq | None = None) -> dict[str, Any]:
-        if not ai.get_api_key():
-            raise HTTPException(400, "未检测到 GOOGLE_API_KEY 或 GEMINI_API_KEY 环境变量")
+        if not ai.is_configured():
+            raise HTTPException(
+                400,
+                "未检测到可用的 AI 后端：请配置 GOOGLE_API_KEY / GEMINI_API_KEY，或安装并登录 Antigravity CLI (`agy`) / Gemini CLI",
+            )
         rows = conn.execute("SELECT * FROM entries ORDER BY trade_date DESC, id DESC LIMIT 20").fetchall()
         if not rows:
             raise HTTPException(400, "还没有交易复盘记录，先写 1 条再来让 Gemini 总结")
@@ -628,8 +635,11 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         user_msg = (req.message or "").strip()
         if not user_msg:
             raise HTTPException(400, "请输入你的回复")
-        if not ai.get_api_key():
-            raise HTTPException(400, "未检测到 GOOGLE_API_KEY 或 GEMINI_API_KEY 环境变量")
+        if not ai.is_configured():
+            raise HTTPException(
+                400,
+                "未检测到可用的 AI 后端：请配置 GOOGLE_API_KEY / GEMINI_API_KEY，或安装并登录 Antigravity CLI (`agy`) / Gemini CLI",
+            )
 
         day = db.today_str()
         summary = morning.build_morning_summary(conn, force=False)

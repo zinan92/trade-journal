@@ -412,6 +412,7 @@ def test_ai_tiered_model_routing_across_three_endpoints(tmp_path: Path, monkeypa
     boot = client.get("/api/bootstrap")
     assert boot.status_code == 200
     assert boot.json()["aiModels"] == {
+        "provider": "api",
         "fast": "gemini-3.8-flash",
         "pro": "gemini-4-neon",
         "proThinking": "high",
@@ -452,6 +453,88 @@ def test_ai_tiered_model_routing_across_three_endpoints(tmp_path: Path, monkeypa
         "thinkingConfig": {"thinkingLevel": "HIGH"},
     }
     assert captured_calls[2]["timeout"] == ai.PRO_TIMEOUT_SEC
+
+
+def test_ai_provider_auto_resolution_and_agy_cli_headless(monkeypatch) -> None:
+    import subprocess
+    from trade_journal import ai
+
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_PROVIDER", "auto")
+    monkeypatch.setattr(ai, "find_agy_bin", lambda: "/fake/bin/agy")
+    monkeypatch.setattr(ai, "find_gemini_cli_bin", lambda: "/fake/bin/gemini")
+    assert ai.resolve_provider() == "agy"
+
+    seen_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        seen_cmds.append(cmd)
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout='{"status":"SUCCESS","response":"推演完成：锁死 0.5R 上限。"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(ai.subprocess, "run", fake_run)
+    text_fast, m_fast = ai.generate_content("整理口述", tier="fast")
+    assert text_fast == "推演完成：锁死 0.5R 上限。"
+    assert m_fast == "agy:low"
+    assert "--effort" in seen_cmds[0] and seen_cmds[0][seen_cmds[0].index("--effort") + 1] == "low"
+    assert "--disable-slash-commands" in seen_cmds[0]
+
+    monkeypatch.setenv("AGY_PRO_MODEL", "gemini-4-neon")
+    text_pro, m_pro = ai.generate_content("深度复盘", tier="pro")
+    assert text_pro == "推演完成：锁死 0.5R 上限。"
+    assert m_pro == "gemini-4-neon"
+    assert "--effort" in seen_cmds[1] and seen_cmds[1][seen_cmds[1].index("--effort") + 1] == "high"
+    assert "--model" in seen_cmds[1] and seen_cmds[1][seen_cmds[1].index("--model") + 1] == "gemini-4-neon"
+
+
+def test_ai_gemini_cli_headless_and_error_hint(monkeypatch) -> None:
+    import subprocess
+    from trade_journal import ai
+
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_PROVIDER", "auto")
+    monkeypatch.setattr(ai, "find_agy_bin", lambda: None)
+    monkeypatch.setattr(ai, "find_gemini_cli_bin", lambda: "/fake/bin/gemini")
+    assert ai.resolve_provider() == "gemini-cli"
+
+    def fake_run_ok(cmd, **kwargs):
+        assert "--skip-trust" in cmd
+        assert "-o" in cmd and cmd[cmd.index("-o") + 1] == "json"
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout='{"response":"行为漏洞：高频踏空后追高。"}',
+            stderr="Loaded cached credentials.\n",
+        )
+
+    monkeypatch.setattr(ai.subprocess, "run", fake_run_ok)
+    txt, model = ai.generate_content("审计复盘", tier="pro")
+    assert txt == "行为漏洞：高频踏空后追高。"
+    assert model == f"gemini-cli:{ai.DEFAULT_GEMINI_CLI_PRO_MODEL}"
+
+    # Verify helpful error message when personal OAuth is rejected by Gemini CLI
+    def fake_run_err(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=1,
+            stdout="",
+            stderr="An unexpected critical error occurred: This client is no longer supported for Gemini Code Assist for individuals.",
+        )
+
+    monkeypatch.setattr(ai.subprocess, "run", fake_run_err)
+    try:
+        ai.generate_content("审计复盘", tier="pro")
+        assert False, "expected GeminiError"
+    except ai.GeminiError as exc:
+        assert exc.status_code == 502
+        assert "Antigravity CLI" in str(exc)
+
 
 
 

@@ -2,17 +2,17 @@
 # 每日早上 09:00 自动拉起 Trade Journal（8796）并弹出「晨间 K 线快照 + 今日交易计划」
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$HOME/.trade-journal/logs"
 mkdir -p "$LOG_DIR"
 
-# 读取用户 ~/.zshrc 中的 Gemini 相关配置（若尚未在环境里）
+# 读取用户 ~/.zshrc 中的 AI 相关配置（若尚未在环境里）
 if [[ -f "$HOME/.zshrc" ]]; then
   if [[ -z "${GOOGLE_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" ]]; then
     eval "$(grep -E '^[[:space:]]*export[[:space:]]+(GOOGLE_API_KEY|GEMINI_API_KEY)=' "$HOME/.zshrc" 2>/dev/null || true)"
   fi
-  eval "$(grep -E '^[[:space:]]*export[[:space:]]+(GEMINI_FAST_MODEL|GEMINI_PRO_MODEL|GEMINI_PRO_THINKING)=' "$HOME/.zshrc" 2>/dev/null || true)"
+  eval "$(grep -E '^[[:space:]]*export[[:space:]]+(GEMINI_PROVIDER|GEMINI_FAST_MODEL|GEMINI_PRO_MODEL|GEMINI_PRO_THINKING|AGY_FAST_MODEL|AGY_PRO_MODEL|GEMINI_CLI_FAST_MODEL|GEMINI_CLI_PRO_MODEL)=' "$HOME/.zshrc" 2>/dev/null || true)"
 fi
 
 PYTHON_BIN="/usr/local/bin/python3"
