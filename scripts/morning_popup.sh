@@ -31,9 +31,9 @@ if ! curl -fsS --max-time 2 "http://127.0.0.1:8796/api/bootstrap" >/dev/null 2>&
   done
 fi
 
-# 2. 预热今日体温计 + 周线 K 线缓存，保证弹窗秒开
+# 2. 预热今日体温计 + 4h K 线缓存，保证弹窗秒开
 curl -fsS --max-time 45 "http://127.0.0.1:8796/api/morning/summary?force=true" >/dev/null 2>&1 || true
-curl -fsS --max-time 45 "http://127.0.0.1:8796/api/morning/charts?interval=1wk&force=true" >/dev/null 2>&1 || true
+curl -fsS --max-time 45 "http://127.0.0.1:8796/api/morning/charts?interval=4h&force=true" >/dev/null 2>&1 || true
 
 # 3. 自动在桌面默认浏览器弹出晨间快照页 + 轻提醒
 open "http://127.0.0.1:8796/?view=morning"

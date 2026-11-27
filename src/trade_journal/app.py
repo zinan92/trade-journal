@@ -813,7 +813,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         return {"ok": True, **morning.build_morning_summary(conn, force=force)}
 
     @app.get("/api/morning/charts")
-    def api_morning_charts(interval: str = "1wk", section: str = "", force: bool = False) -> dict[str, Any]:
+    def api_morning_charts(interval: str = "4h", section: str = "", force: bool = False) -> dict[str, Any]:
         return {"ok": True, **morning.build_morning_charts(conn, interval=interval, section=section, force=force)}
 
     @app.get("/api/plans/today")

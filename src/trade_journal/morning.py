@@ -511,13 +511,13 @@ def build_coach_opening(summary: dict[str, Any]) -> str:
 def build_morning_charts(
     conn: sqlite3.Connection,
     *,
-    interval: str = "1wk",
+    interval: str = "4h",
     section: str = "",
     force: bool = False,
     allow_network: bool = True,
 ) -> dict[str, Any]:
-    """返回指定周期（1wk / 4h / 15m / 1d）的所有分组 K 线数据，用于整页网格肉眼扫图。"""
-    iv = interval if interval in INTERVAL_BAR_LIMITS else "1wk"
+    """返回指定周期（4h / 1wk / 15m / 1d）的所有分组 K 线数据，用于整页网格肉眼扫图。"""
+    iv = interval if interval in INTERVAL_BAR_LIMITS else "4h"
     bar_limit = INTERVAL_BAR_LIMITS[iv]
 
     target_sections = [s for s in MORNING_SECTIONS if not section or s["id"] == section]
